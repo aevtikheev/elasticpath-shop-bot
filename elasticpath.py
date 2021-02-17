@@ -4,7 +4,7 @@ Module to work with Elasticpath API.
 Contains wrapper for the API and classes for common entities like product, cart, etc.
 """
 import time
-from typing import List, Union
+from typing import List, Union, Optional, IO
 
 import httpx
 
@@ -15,11 +15,12 @@ ELASTICPATH_API_URL = 'https://api.moltin.com/v2'
 class ElasticPathAPI:
     """Wrapper for Elasticpath API."""
 
-    def __init__(self, client_id):
+    def __init__(self, client_id: str, client_secret: Optional[str] = None) -> None:
         self._client = None
         self._expires_at = 0
 
         self._client_id = client_id
+        self._client_secret = client_secret
 
     @property
     def client(self) -> httpx.Client:
@@ -36,13 +37,47 @@ class ElasticPathAPI:
         product_data = response.json()['data']
         return Product(product_data)
 
-    def get_or_create_cart(self, cart_reference: Union[str, int]) -> 'Cart':
-        """Get cart by reference, create if it doesn't exist."""
-        response = self.client.get(f'{ELASTICPATH_API_URL}/carts/{cart_reference}')
+    def create_product(
+            self,
+            name: str,
+            slug: str,
+            sku: str,
+            manage_stock: bool,
+            description: str,
+            price_amount: int,
+            price_currency: str,
+            price_includes_tax: bool,
+            status: str,
+            commodity_type: str,
+    ) -> 'Product':
+        """
+        Create a product.
+
+        Data that needs to be provided described here:
+        https://documentation.elasticpath.com/commerce-cloud/docs/api/catalog/products/create-a-product.html
+        """
+        product_data = {
+            'type': 'product',
+            'name': name,
+            'slug': slug,
+            'sku': sku,
+            'description': description,
+            'manage_stock': manage_stock,
+            'price': [
+                {
+                    'amount': price_amount,
+                    'currency': price_currency,
+                    'includes_tax': price_includes_tax,
+                },
+            ],
+            'status': status,
+            'commodity_type': commodity_type,
+        }
+        response = self.client.post(f'{ELASTICPATH_API_URL}/products', json={'data': product_data})
         response.raise_for_status()
 
-        cart_data = response.json()['data']
-        return Cart(cart_reference, cart_data)
+        product_data = response.json()['data']
+        return Product(product_data)
 
     def get_products(self, *, limit: int = 10, offset: int = 0) -> List['Product']:
         """Get all products from the API using limit/offset pagination."""
@@ -57,6 +92,32 @@ class ElasticPathAPI:
         for product_data in all_products_data:
             products.append(Product(product_data))
         return products
+
+    def add_file_to_product(self, file: 'File', product: 'Product'):
+        """Create relationship between a file and a product."""
+        file_data = [{'type': 'file', 'id': file.id}]
+        response = self.client.post(
+            f'{ELASTICPATH_API_URL}/products/{product.id}/relationships/files',
+            json=file_data
+        )
+        response.raise_for_status()
+
+    def add_main_image_to_product(self, file: 'File', product: 'Product'):
+        """Create relationship between a file and a product."""
+        file_data = {'data': {'type': 'main_image', 'id': file.id}}
+        response = self.client.post(
+            f'{ELASTICPATH_API_URL}/products/{product.id}/relationships/main-image',
+            json=file_data
+        )
+        response.raise_for_status()
+
+    def get_or_create_cart(self, cart_reference: Union[str, int]) -> 'Cart':
+        """Get cart by reference, create if it doesn't exist."""
+        response = self.client.get(f'{ELASTICPATH_API_URL}/carts/{cart_reference}')
+        response.raise_for_status()
+
+        cart_data = response.json()['data']
+        return Cart(cart_reference, cart_data)
 
     def add_product_to_cart(self, product: 'Product', cart: 'Cart', quantity: int = 1) -> None:
         """Add one or more items of a product to a cart."""
@@ -100,6 +161,18 @@ class ElasticPathAPI:
         file_data = response.json()['data']
         return File(file_data)
 
+    def create_file(self, file_descriptor: IO, is_public: bool = True) -> 'File':
+        """Get URL for a file."""
+        response = self.client.post(
+            f'{ELASTICPATH_API_URL}/files',
+            json={'public': is_public},
+            files={'file': file_descriptor},
+        )
+        response.raise_for_status()
+
+        file_data = response.json()['data']
+        return File(file_data)
+
     def create_customer(self, email: str, name: str = 'Anonymous') -> None:
         """Create customer in ElasticPath shop."""
         customer_data = {
@@ -114,10 +187,15 @@ class ElasticPathAPI:
 
     def _authorize(self):
         """Authorize at Elasticpath API."""
-        response = httpx.post(
-            ELASTICPATH_AUTH_URL,
-            data={'client_id': self._client_id, 'grant_type': 'implicit'},
-        )
+        if self._client_secret is None:
+            auth_data = {'client_id': self._client_id, 'grant_type': 'implicit'}
+        else:
+            auth_data = {
+                'client_id': self._client_id,
+                'client_secret': self._client_secret,
+                'grant_type': 'client_credentials',
+            }
+        response = httpx.post(ELASTICPATH_AUTH_URL, data=auth_data)
         response.raise_for_status()
 
         auth_response_data = response.json()
@@ -143,7 +221,10 @@ class Product:
         self.stock_level = self._product_data['meta']['stock']['level']
         self.stock_availability = self._product_data['meta']['stock']['availability']
 
-        self.main_image_id = self._product_data['relationships']['main_image']['data']['id']
+        if 'main_image' in self._product_data['relationships']:
+            self.main_image_id = self._product_data['relationships']['main_image']['data']['id']
+        else:
+            self.main_image_id = None
 
 
 class Cart:
