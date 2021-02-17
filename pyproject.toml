@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "elasticpath-shop-bot"
+version = "0.1.0"
+description = ""
+authors = ["aevtikheev <eft000@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8.5"
+python-telegram-bot = "13.2"
+environs = "9.3.1"
+redis = "3.5.3"
+httpx = "0.16.1"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
