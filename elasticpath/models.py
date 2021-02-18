@@ -68,6 +68,7 @@ class Flow:
 
         self.id = self._flow_data['id']
         self.name = self._flow_data['name']
+        self.slug = self._flow_data['slug']
 
 
 class Field:
@@ -78,3 +79,4 @@ class Field:
 
         self.id = self._field_data['id']
         self.name = self._field_data['name']
+        self.slug = self._field_data['slug']

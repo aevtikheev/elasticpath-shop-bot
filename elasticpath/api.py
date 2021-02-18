@@ -289,6 +289,23 @@ class _FlowsAPI:
         flow_data = response.json()['data']
         return Flow(flow_data)
 
+    def create_entry(self, flow: Union[str, Flow], fields: dict) -> None:
+        """
+        Create entry for a flow.
+
+        :param flow: Flow object or a slug for the flow you are requesting an entry for.
+        :param fields: Dict with field slug for each field on this flow along
+         with the corresponding value for this entry.
+        """
+        flow_slug = flow.slug if isinstance(flow, Flow) else flow
+        entry_data = {
+            'data': {
+                'type': 'entry',
+                **fields,
+            },
+        }
+        self._session.post(f'{self._url}/{flow_slug}/entries', json=entry_data)
+
 
 class _FieldsAPI:
     """Wrapper for Elasticpath fields resource."""
