@@ -6,7 +6,7 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import httpx
 
-from elasticpath.models import Cart, CartItem, File, Product
+from elasticpath.models import Cart, CartItem, Field, File, Flow, Product
 
 ELASTICPATH_AUTH_URL = 'https://api.moltin.com/oauth/access_token'
 ELASTICPATH_API_URL = 'https://api.moltin.com/v2'
@@ -24,6 +24,8 @@ class ElasticpathAPI:
         self.carts = _CartsAPI(self._session)
         self.files = _FilesAPI(self._session)
         self.customers = _CustomersAPI(self._session)
+        self.flows = _FlowsAPI(self._session)
+        self.fields = _FieldsAPI(self._session)
 
 
 class _APISession:
@@ -262,3 +264,74 @@ class _CustomersAPI:
             },
         }
         self._session.post(f'{self._url}', json=customer_data)
+
+
+class _FlowsAPI:
+    """Wrapper for Elasticpath flows resource."""
+
+    def __init__(self, session: _APISession) -> None:
+        self._session = session
+        self._url = f'{ELASTICPATH_API_URL}/flows'
+
+    def create_flow(self, enabled: bool, description: str, slug: str, name: str) -> Flow:
+        """Create flow in ElasticPath shop."""
+        flow_data = {
+            'data': {
+                'type': 'flow',
+                'name': name,
+                'slug': slug,
+                'description': description,
+                'enabled': enabled,
+            },
+        }
+        response = self._session.post(f'{self._url}', json=flow_data)
+
+        flow_data = response.json()['data']
+        return Flow(flow_data)
+
+
+class _FieldsAPI:
+    """Wrapper for Elasticpath fields resource."""
+
+    def __init__(self, session: _APISession) -> None:
+        self._session = session
+        self._url = f'{ELASTICPATH_API_URL}/fields'
+
+    def create_field(
+            self,
+            enabled: bool,
+            description: str,
+            slug: str,
+            name: str,
+            field_type: str,
+            required: bool,
+            flow: Flow,
+    ) -> Field:
+        """Create field in ElasticPath shop."""
+        available_types = ['string', 'integer', 'boolean', 'float', 'relationship', 'date']
+        if field_type not in available_types:
+            raise ValueError(f'Field type {field_type} must be one of {available_types}')
+
+        field_data = {
+            'data': {
+                'type': 'field',
+                'name': name,
+                'slug': slug,
+                'description': description,
+                'enabled': enabled,
+                'field_type': field_type,
+                'required': required,
+                'relationships': {
+                    'flow': {
+                        'data': {
+                            'type': 'flow',
+                            'id': flow.id,
+                        },
+                    },
+                },
+            },
+        }
+        response = self._session.post(f'{self._url}', json=field_data)
+
+        field_data = response.json()['data']
+        return Field(field_data)

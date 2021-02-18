@@ -58,3 +58,23 @@ class File:
 
         self.id = self._file_data['id']
         self.link = self._file_data['link']['href']
+
+
+class Flow:
+    """Represents a flow from Elasticpath shop."""
+
+    def __init__(self, flow_data: dict):
+        self._flow_data = flow_data
+
+        self.id = self._flow_data['id']
+        self.name = self._flow_data['name']
+
+
+class Field:
+    """Represents a field from Elasticpath shop."""
+
+    def __init__(self, field_data: dict):
+        self._field_data = field_data
+
+        self.id = self._field_data['id']
+        self.name = self._field_data['name']
