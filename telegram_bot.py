@@ -76,8 +76,8 @@ class ElasticpathShopBot:
             context.user_data[PRODUCT_LIST_PAGE] -= 1
             self.show_product_list(update, context)
             return PRODUCT_LIST_STATE
-        else:
-            self.show_product_description(update, context)
+        else:  # callback_data is a product ID
+            self.show_product_description(update=update, context=context, product_id=callback_data)
             return PRODUCT_DESCRIPTION_STATE
 
     def handle_product_description_state(self, update: Update, context: CallbackContext) -> str:
@@ -102,6 +102,7 @@ class ElasticpathShopBot:
                 quantity=amount,
             )
             update.callback_query.answer('Added')
+            self.show_product_description(update=update, context=context, product_id=product_id)
             next_state = PRODUCT_DESCRIPTION_STATE
 
         return next_state
@@ -180,16 +181,24 @@ class ElasticpathShopBot:
             )
             query.delete_message()
 
-    def show_product_description(self, update: Update, context: CallbackContext) -> None:
+    def show_product_description(
+            self,
+            update: Update,
+            context: CallbackContext,
+            product_id: str,
+    ) -> None:
         query = update.callback_query
         query.answer()
 
-        product = self.elasticpath_api.products.get_product(query.data)
+        product = self.elasticpath_api.products.get_product(product_id)
+        cart = self.elasticpath_api.carts.get_or_create_cart(update.callback_query.message.chat_id)
+        amount_in_cart = self.elasticpath_api.carts.amount_of_product_in_cart(product.id, cart)
 
         product_description = (
             f'*{product.name}*\n\n'
             f'*Price*: {product.formatted_price}\n'
-            f'*Availability*: {product.stock_level} {product.stock_availability}\n\n'
+            f'*Availability*: {product.stock_level} {product.stock_availability}\n'
+            f'*In cart*: {amount_in_cart}\n\n'
             f'{product.description}\n'
         )
 
@@ -199,7 +208,8 @@ class ElasticpathShopBot:
                 InlineKeyboardButton(
                     text=f'Add {amount}',
                     callback_data=serialize_product_id_and_amount(
-                        product_id=product.id, amount=amount,
+                        product_id=product.id,
+                        amount=amount,
                     ),
                 ),
             )

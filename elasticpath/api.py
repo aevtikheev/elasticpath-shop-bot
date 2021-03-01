@@ -220,6 +220,17 @@ class _CartsAPI:
         cart_item_url = f'{self._url}/{cart.reference}/items/{cart_item_id}'
         self._session.delete(cart_item_url)
 
+    def amount_of_product_in_cart(self, product_id: str, cart: 'Cart') -> int:
+        """Get amount of a product (specified by ID) in cart."""
+        cart_items = self.get_cart_items(cart)
+
+        amount = 0
+        for cart_item in cart_items:
+            if cart_item.product_id == product_id:
+                amount += 1
+
+        return amount
+
 
 class _FilesAPI:
     """Wrapper for Elasticpath files resource."""
