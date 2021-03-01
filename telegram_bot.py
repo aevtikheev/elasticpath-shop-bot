@@ -19,6 +19,8 @@ PRODUCT_LIST_CALLBACK_DATA = 'product list callback data'
 SHOW_CART_CALLBACK_DATA = 'show cart callback data'
 CHECKOUT_CALLBACK_DATA = 'order callback data'
 
+AVAILABLE_PRODUCT_AMOUNTS = [1]
+
 
 class ElasticpathShopBot:
     """Telegram bot for Elasticpath shop."""
@@ -82,6 +84,7 @@ class ElasticpathShopBot:
                 cart=cart,
                 quantity=amount,
             )
+            update.callback_query.answer('Added')
             next_state = PRODUCT_DESCRIPTION_STATE
 
         return next_state
@@ -154,8 +157,7 @@ class ElasticpathShopBot:
         )
 
         add_amount_buttons = []
-        possible_amounts = [1, 5, 15]
-        for amount in possible_amounts:
+        for amount in AVAILABLE_PRODUCT_AMOUNTS:
             add_amount_buttons.append(
                 InlineKeyboardButton(
                     text=f'Add {amount}',
