@@ -15,11 +15,16 @@ PRODUCT_DESCRIPTION_STATE = 'product description state'
 CART_STATE = 'cart state'
 WAIT_EMAIL_STATE = 'wait for email state'
 
-PRODUCT_LIST_CALLBACK_DATA = 'product list callback data'
-SHOW_CART_CALLBACK_DATA = 'show cart callback data'
-CHECKOUT_CALLBACK_DATA = 'order callback data'
+PRODUCT_LIST_CALLBACK_DATA = 'product list callback'
+SHOW_CART_CALLBACK_DATA = 'show cart callback'
+CHECKOUT_CALLBACK_DATA = 'order callback'
+NEXT_PAGE_CALLBACK_DATA = 'next page'
+PREVIOUS_PAGE_CALLBACK_DATA = 'previous page'
+
+PRODUCT_LIST_PAGE = 'page'
 
 AVAILABLE_PRODUCT_AMOUNTS = [1]
+PRODUCT_LIST_PAGE_SIZE = 8
 
 
 class ElasticpathShopBot:
@@ -56,12 +61,24 @@ class ElasticpathShopBot:
         self.users_db.set(chat_id, next_state)
 
     def handle_start_state(self, update: Update, context: CallbackContext) -> str:
+        context.user_data[PRODUCT_LIST_PAGE] = 0
         self.show_product_list(update, context)
         return PRODUCT_LIST_STATE
 
     def handle_product_list_state(self, update: Update, context: CallbackContext) -> str:
-        self.show_product_description(update, context)
-        return PRODUCT_DESCRIPTION_STATE
+        callback_data = update.callback_query.data
+
+        if callback_data == NEXT_PAGE_CALLBACK_DATA:
+            context.user_data[PRODUCT_LIST_PAGE] += 1
+            self.show_product_list(update, context)
+            return PRODUCT_LIST_STATE
+        if callback_data == PREVIOUS_PAGE_CALLBACK_DATA:
+            context.user_data[PRODUCT_LIST_PAGE] -= 1
+            self.show_product_list(update, context)
+            return PRODUCT_LIST_STATE
+        else:
+            self.show_product_description(update, context)
+            return PRODUCT_DESCRIPTION_STATE
 
     def handle_product_description_state(self, update: Update, context: CallbackContext) -> str:
         callback_data = update.callback_query.data
@@ -114,17 +131,37 @@ class ElasticpathShopBot:
     def handle_email_state(self, update: Update, context: CallbackContext) -> str:
         email = update.message.text
         self.elasticpath_api.customers.create_customer(email)
-
         update.message.reply_text('Thank you a lot! We will contact you soon.')
         return START_STATE
 
     def show_product_list(self, update: Update, context: CallbackContext) -> None:
+        current_page = context.user_data['page']
+
         menu_text = '*Please select a product:*'
         buttons = []
-        for product in self.elasticpath_api.products.get_products():
+        for product in self.elasticpath_api.products.get_products(
+                limit=PRODUCT_LIST_PAGE_SIZE, offset=PRODUCT_LIST_PAGE_SIZE*current_page
+        ):
             buttons.append(
                 [InlineKeyboardButton(product.name, callback_data=product.id)],
             )
+
+        navigation_buttons = []
+        if current_page > 0:
+            navigation_buttons.append(
+                InlineKeyboardButton('<<<', callback_data=PREVIOUS_PAGE_CALLBACK_DATA)
+            )
+        next_page_products_amount = len(
+            self.elasticpath_api.products.get_products(
+                limit=PRODUCT_LIST_PAGE_SIZE, offset=PRODUCT_LIST_PAGE_SIZE*(current_page+1)
+            )
+        )
+        if next_page_products_amount > 0:
+            navigation_buttons.append(
+                InlineKeyboardButton('>>>', callback_data=NEXT_PAGE_CALLBACK_DATA)
+            )
+        buttons.append(navigation_buttons)
+
         reply_markup = InlineKeyboardMarkup(buttons)
 
         if update.message:
