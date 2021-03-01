@@ -6,7 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Upda
 from telegram.ext import CallbackContext, Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
-from elasticpath import ElasticPathAPI
+from elasticpath.api import ElasticpathAPI
 from settings import settings
 
 START_STATE = 'start state'
@@ -23,7 +23,7 @@ CHECKOUT_CALLBACK_DATA = 'order callback data'
 class ElasticpathShopBot:
     """Telegram bot for Elasticpath shop."""
 
-    def __init__(self, elasticpath_api: ElasticPathAPI, users_db: Redis) -> None:
+    def __init__(self, elasticpath_api: ElasticpathAPI, users_db: Redis) -> None:
         self.elasticpath_api = elasticpath_api
         self.users_db = users_db
 
@@ -74,11 +74,11 @@ class ElasticpathShopBot:
 
         else:  # callback_data is a JSON containing product ID and amount
             product_id, amount = deserialize_product_id_and_amount(callback_data)
-            cart = self.elasticpath_api.get_or_create_cart(
+            cart = self.elasticpath_api.carts.get_or_create_cart(
                 update.callback_query.message.chat_id,
             )
-            self.elasticpath_api.add_product_to_cart(
-                product=self.elasticpath_api.get_product(product_id),
+            self.elasticpath_api.carts.add_product_to_cart(
+                product=self.elasticpath_api.products.get_product(product_id),
                 cart=cart,
                 quantity=amount,
             )
@@ -99,9 +99,9 @@ class ElasticpathShopBot:
             next_state = WAIT_EMAIL_STATE
 
         else:  # callback_data is an item ID
-            cart = self.elasticpath_api.get_or_create_cart(chat_id)
+            cart = self.elasticpath_api.carts.get_or_create_cart(chat_id)
             cart_item_id = callback_data
-            self.elasticpath_api.remove_cart_item(cart, cart_item_id)
+            self.elasticpath_api.carts.remove_cart_item(cart, cart_item_id)
 
             self.show_cart(update, context)
             next_state = CART_STATE
@@ -110,7 +110,7 @@ class ElasticpathShopBot:
 
     def handle_email_state(self, update: Update, context: CallbackContext) -> str:
         email = update.message.text
-        self.elasticpath_api.create_customer(email)
+        self.elasticpath_api.customers.create_customer(email)
 
         update.message.reply_text('Thank you a lot! We will contact you soon.')
         return START_STATE
@@ -118,7 +118,7 @@ class ElasticpathShopBot:
     def show_product_list(self, update: Update, context: CallbackContext) -> None:
         menu_text = '*Please select a product:*'
         buttons = []
-        for product in self.elasticpath_api.get_products():
+        for product in self.elasticpath_api.products.get_products():
             buttons.append(
                 [InlineKeyboardButton(product.name, callback_data=product.id)],
             )
@@ -144,7 +144,7 @@ class ElasticpathShopBot:
         query = update.callback_query
         query.answer()
 
-        product = self.elasticpath_api.get_product(query.data)
+        product = self.elasticpath_api.products.get_product(query.data)
 
         product_description = (
             f'*{product.name}*\n\n'
@@ -171,7 +171,7 @@ class ElasticpathShopBot:
         ]
 
         query.message.reply_photo(
-            photo=self.elasticpath_api.get_file(product.main_image_id).link,
+            photo=self.elasticpath_api.files.get_file(product.main_image_id).link,
             caption=product_description,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=ParseMode.MARKDOWN,
@@ -184,10 +184,10 @@ class ElasticpathShopBot:
 
         buttons = []
         message_text = '*Items in cart*:\n'
-        cart = self.elasticpath_api.get_or_create_cart(
+        cart = self.elasticpath_api.carts.get_or_create_cart(
             update.callback_query.message.chat_id,
         )
-        for cart_item in self.elasticpath_api.get_cart_items(cart):
+        for cart_item in self.elasticpath_api.carts.get_cart_items(cart):
             message_text += (
                 f'*{cart_item.name}*\n'
                 f'*Price per unit*: {cart_item.formatted_price}\n'
@@ -233,7 +233,7 @@ def start_bot() -> None:
         port=settings.redis_port,
         password=settings.redis_password,
     )
-    elasticpath_api = ElasticPathAPI(client_id=settings.elasticpath_client_id)
+    elasticpath_api = ElasticpathAPI(client_id=settings.elasticpath_client_id)
 
     bot = ElasticpathShopBot(elasticpath_api, users_db)
 

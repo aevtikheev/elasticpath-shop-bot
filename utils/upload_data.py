@@ -45,7 +45,7 @@ def add_picture_for_product(product: Product, picture_url: str) -> None:
     )
     product_picture = httpx.get(picture_url).content
 
-    picture_file = tempfile.NamedTemporaryFile(delete=False)
+    picture_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
     picture_file.write(product_picture)
     picture_file.close()
 

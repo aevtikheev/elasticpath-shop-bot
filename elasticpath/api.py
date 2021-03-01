@@ -2,6 +2,7 @@
 import contextlib
 import logging
 import time
+from json.decoder import JSONDecodeError
 from typing import Callable, List, Optional, Tuple, Union
 
 import httpx
@@ -65,7 +66,7 @@ class _APISession:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError:
-            with contextlib.suppress():
+            with contextlib.suppress(JSONDecodeError):
                 logger.error(response.json())
             raise
         return response
