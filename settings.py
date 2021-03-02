@@ -14,6 +14,8 @@ class Settings:
     redis_host: str
     redis_port: int
     redis_password: str
+    yandex_geocoder_api_key: str
+    shop_flow: str
 
 
 def get_settings() -> Settings:
@@ -27,6 +29,8 @@ def get_settings() -> Settings:
         redis_host=env('REDIS_HOST', None),
         redis_port=env.int('REDIS_PORT', None),
         redis_password=env('REDIS_PASSWORD', None),
+        yandex_geocoder_api_key=env('YANDEX_GEOCODER_API_KEY', None),
+        shop_flow=env('SHOP_FLOW', None),
     )
 
 

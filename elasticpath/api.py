@@ -3,11 +3,11 @@ import contextlib
 import logging
 import time
 from json.decoder import JSONDecodeError
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import httpx
 
-from elasticpath.models import Cart, CartItem, Field, File, Flow, Product
+from elasticpath.models import Cart, CartItem, Entry, Field, File, Flow, Product
 
 ELASTICPATH_AUTH_URL = 'https://api.moltin.com/oauth/access_token'
 ELASTICPATH_API_URL = 'https://api.moltin.com/v2'
@@ -275,7 +275,6 @@ class _CustomersAPI:
                 'email': email,
             },
         }
-        self._session.post(f'{self._url}', json=customer_data)
 
 
 class _FlowsAPI:
@@ -317,6 +316,30 @@ class _FlowsAPI:
             },
         }
         self._session.post(f'{self._url}/{flow_slug}/entries', json=entry_data)
+
+    def get_entries(self, slug: str, *, limit: int = 10, offset: int = 0) -> List[Entry]:
+        """Get entries for a specified flow."""
+        response = self._session.get(
+            f'{self._url}/{slug}/entries',
+            params={'page[limit]': limit, 'page[offset]': offset},
+        )
+
+        entries = []
+        entries_data = response.json()['data']
+        for entry in entries_data:
+            entries.append(Entry(entry))
+
+        return entries
+
+    def get_all_entries(self, slug: str, batch_size: int = 10) -> Iterable[Entry]:
+        """Get all entries for a specified flow."""
+        offset = 0
+        entries_batch = self.get_entries(slug, limit=batch_size, offset=offset)
+        while entries_batch:
+            for entry in entries_batch:
+                yield entry
+            offset += batch_size
+            entries_batch = self.get_entries(slug, limit=batch_size, offset=offset)
 
 
 class _FieldsAPI:

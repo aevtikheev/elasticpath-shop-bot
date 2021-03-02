@@ -6,14 +6,16 @@ authors = ["aevtikheev <eft000@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8.5"
-python-telegram-bot = "13.2"
-environs = "9.3.1"
-redis = "3.5.3"
-httpx = "0.16.1"
-awesome-slugify = "1.6.5"
+python-telegram-bot = "^13.3"
+environs = "^9.3.1"
+redis = "^3.5.3"
+httpx = "^0.17.0"
+awesome-slugify = "^1.6.5"
+geopy = "^2.1.0"
 
 [tool.poetry.dev-dependencies]
-pylint = "2.7.2"
+pylint = "^2.7.2"
+wemake-python-styleguide = "^0.15.2"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

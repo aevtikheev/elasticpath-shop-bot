@@ -1,5 +1,6 @@
 """Telegram bot for Elasticpath shop."""
 import json
+from typing import Union
 
 from redis import Redis
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Update
@@ -7,6 +8,9 @@ from telegram.ext import CallbackContext, Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 from elasticpath.api import ElasticpathAPI
+from elasticpath.models import Entry
+from geocoding import fetch_coordinates, UnknownAddressError
+from geopy.distance import distance
 from settings import settings
 
 START_STATE = 'start state'
@@ -14,6 +18,7 @@ PRODUCT_LIST_STATE = 'product list state'
 PRODUCT_DESCRIPTION_STATE = 'product description state'
 CART_STATE = 'cart state'
 WAIT_EMAIL_STATE = 'wait for email state'
+WAIT_LOCATION_STATE = 'wait for location state'
 
 PRODUCT_LIST_CALLBACK_DATA = 'product list callback'
 SHOW_CART_CALLBACK_DATA = 'show cart callback'
@@ -30,16 +35,17 @@ PRODUCT_LIST_PAGE_SIZE = 8
 class ElasticpathShopBot:
     """Telegram bot for Elasticpath shop."""
 
-    def __init__(self, elasticpath_api: ElasticpathAPI, users_db: Redis) -> None:
+    def __init__(self, elasticpath_api: ElasticpathAPI, users_db: Redis, shop_flow: str) -> None:
         self.elasticpath_api = elasticpath_api
         self.users_db = users_db
+        self.shop_flow = shop_flow
 
         self._state_functions = {
             START_STATE: self.handle_start_state,
             PRODUCT_LIST_STATE: self.handle_product_list_state,
             PRODUCT_DESCRIPTION_STATE: self.handle_product_description_state,
             CART_STATE: self.handle_cart_state,
-            WAIT_EMAIL_STATE: self.handle_email_state,
+            WAIT_LOCATION_STATE: self.handle_location_state,
         }
 
     def handle_users_reply(self, update: Update, context: CallbackContext):
@@ -116,8 +122,10 @@ class ElasticpathShopBot:
             next_state = PRODUCT_LIST_STATE
 
         elif callback_data == CHECKOUT_CALLBACK_DATA:
-            update.callback_query.message.reply_text('Please enter your email:')
-            next_state = WAIT_EMAIL_STATE
+            update.callback_query.message.reply_text(
+                'Please provide you location or your address.'
+            )
+            next_state = WAIT_LOCATION_STATE
 
         else:  # callback_data is an item ID
             cart = self.elasticpath_api.carts.get_or_create_cart(chat_id)
@@ -129,13 +137,61 @@ class ElasticpathShopBot:
 
         return next_state
 
-    def handle_email_state(self, update: Update, context: CallbackContext) -> str:
-        email = update.message.text
-        self.elasticpath_api.customers.create_customer(email)
-        update.message.reply_text('Thank you a lot! We will contact you soon.')
+    def handle_location_state(self, update: Update, context: CallbackContext) -> str:
+        if update.message.location is None:
+            try:
+                longitude, latitude = fetch_coordinates(update.message.text)
+            except UnknownAddressError:
+                update.message.reply_text('Location is not recognized. Please try again.')
+                return WAIT_LOCATION_STATE
+        else:
+            location = update.message.location
+            longitude, latitude = location.longitude, location.latitude
+
+        def shop_distance(shop_entry: Entry) -> int:
+            return int(distance(
+                (shop_entry.fields['Longitude'], shop_entry.fields['Latitude']),
+                (longitude, latitude),
+            ).meters)
+
+        nearest_shop = min(
+            self.elasticpath_api.flows.get_all_entries(self.shop_flow),
+            key=shop_distance,
+        )
+        self.show_delivery_options(
+            update=update,
+            context=context,
+            nearest_shop=nearest_shop,
+            shop_distance=shop_distance(nearest_shop),
+        )
+
         return START_STATE
 
+    def show_delivery_options(
+            self,
+            update: Update,
+            context: CallbackContext,
+            nearest_shop: Entry,
+            shop_distance: int
+    ) -> None:
+        if shop_distance < 500:
+            update.message.reply_text(
+                f'Delivery is free! '
+                f'Also you can get your order at {nearest_shop.fields["Address"]}. '
+                f'It is only {shop_distance} meters away from you.'
+            )
+        elif shop_distance < 5000:
+            update.message.reply_text(f'Delivery price is 100 rubles.')
+        elif shop_distance < 20_000:
+            update.message.reply_text(f'Delivery price is 300 rubles.')
+        else:
+            update.message.reply_text(f'Sorry, you are too far away from the nearest shop :(.')
+
     def show_product_list(self, update: Update, context: CallbackContext) -> None:
+        if update.callback_query is not None:
+            # delete the previous product list page
+            update.callback_query.delete_message()
+
         current_page = context.user_data['page']
 
         menu_text = '*Please select a product:*'
@@ -172,14 +228,12 @@ class ElasticpathShopBot:
                 parse_mode=ParseMode.MARKDOWN,
             )
         else:
-            query = update.callback_query
-            query.answer()
-            query.message.reply_text(
+            update.callback_query.answer()
+            update.callback_query.message.reply_text(
                 text=menu_text,
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.MARKDOWN,
             )
-            query.delete_message()
 
     def show_product_description(
             self,
@@ -284,13 +338,16 @@ def start_bot() -> None:
     )
     elasticpath_api = ElasticpathAPI(client_id=settings.elasticpath_client_id)
 
-    bot = ElasticpathShopBot(elasticpath_api, users_db)
-
+    bot = ElasticpathShopBot(
+        elasticpath_api=elasticpath_api,
+        users_db=users_db,
+        shop_flow=settings.shop_flow,
+    )
     updater = Updater(settings.tg_bot_token)
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CallbackQueryHandler(bot.handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, bot.handle_users_reply))
+    dispatcher.add_handler(MessageHandler(Filters.location | Filters.text, bot.handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', bot.handle_users_reply))
 
     updater.start_polling()

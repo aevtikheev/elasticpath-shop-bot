@@ -80,3 +80,17 @@ class Field:
         self.id = self._field_data['id']
         self.name = self._field_data['name']
         self.slug = self._field_data['slug']
+
+
+class Entry:
+    """Represents a field from Elasticpath shop."""
+
+    def __init__(self, entry_data: dict):
+        self._entry_data = entry_data
+
+        self.id = self._entry_data['id']
+
+        self.fields = {}
+        for key in self._entry_data.keys():
+            if key not in ('id', 'type', 'meta', 'links'):
+                self.fields[key] = self._entry_data[key]
