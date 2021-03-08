@@ -1,7 +1,8 @@
 """Telegram bot for Elasticpath shop."""
 import json
-from typing import Union
+from typing import Callable, List
 
+from geopy.distance import distance
 from redis import Redis
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Update
 from telegram.ext import CallbackContext, Filters, Updater
@@ -9,8 +10,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 from elasticpath.api import ElasticpathAPI
 from elasticpath.models import Entry
-from geocoding import fetch_coordinates, UnknownAddressError
-from geopy.distance import distance
+from geocoding import UnknownAddressError, fetch_coordinates
 from settings import settings
 
 START_STATE = 'start state'
@@ -27,9 +27,8 @@ NEXT_PAGE_CALLBACK_DATA = 'next page'
 PREVIOUS_PAGE_CALLBACK_DATA = 'previous page'
 
 PRODUCT_LIST_PAGE = 'page'
-
-AVAILABLE_PRODUCT_AMOUNTS = [1]
 PRODUCT_LIST_PAGE_SIZE = 8
+AVAILABLE_PRODUCT_AMOUNTS = (1, )
 
 
 class ElasticpathShopBot:
@@ -67,36 +66,39 @@ class ElasticpathShopBot:
         self.users_db.set(chat_id, next_state)
 
     def handle_start_state(self, update: Update, context: CallbackContext) -> str:
+        """Show available products."""
         context.user_data[PRODUCT_LIST_PAGE] = 0
         self.show_product_list(update, context)
         return PRODUCT_LIST_STATE
 
     def handle_product_list_state(self, update: Update, context: CallbackContext) -> str:
+        """Move between product list pages or show the description for a chosen product."""
         callback_data = update.callback_query.data
 
         if callback_data == NEXT_PAGE_CALLBACK_DATA:
             context.user_data[PRODUCT_LIST_PAGE] += 1
             self.show_product_list(update, context)
-            return PRODUCT_LIST_STATE
-        if callback_data == PREVIOUS_PAGE_CALLBACK_DATA:
+            next_state = PRODUCT_LIST_STATE
+        elif callback_data == PREVIOUS_PAGE_CALLBACK_DATA:
             context.user_data[PRODUCT_LIST_PAGE] -= 1
             self.show_product_list(update, context)
-            return PRODUCT_LIST_STATE
+            next_state = PRODUCT_LIST_STATE
         else:  # callback_data is a product ID
             self.show_product_description(update=update, context=context, product_id=callback_data)
-            return PRODUCT_DESCRIPTION_STATE
+            next_state = PRODUCT_DESCRIPTION_STATE
+
+        return next_state
 
     def handle_product_description_state(self, update: Update, context: CallbackContext) -> str:
+        """Move back to product list, show cart or add the product to a cart."""
         callback_data = update.callback_query.data
 
         if callback_data == PRODUCT_LIST_CALLBACK_DATA:
             self.show_product_list(update, context)
             next_state = PRODUCT_LIST_STATE
-
         elif callback_data == SHOW_CART_CALLBACK_DATA:
             self.show_cart(update, context)
             next_state = CART_STATE
-
         else:  # callback_data is a JSON containing product ID and amount
             product_id, amount = deserialize_product_id_and_amount(callback_data)
             cart = self.elasticpath_api.carts.get_or_create_cart(
@@ -114,46 +116,39 @@ class ElasticpathShopBot:
         return next_state
 
     def handle_cart_state(self, update: Update, context: CallbackContext) -> str:
+        """Return back to product list, change the cart items or ask the location of the user."""
         callback_data = update.callback_query.data
-        chat_id = update.callback_query.message.chat_id
 
         if callback_data == PRODUCT_LIST_CALLBACK_DATA:
             self.show_product_list(update, context)
             next_state = PRODUCT_LIST_STATE
-
         elif callback_data == CHECKOUT_CALLBACK_DATA:
-            update.callback_query.message.reply_text(
-                'Please provide you location or your address.'
-            )
+            update.callback_query.message.reply_text('Please provide you location or address.')
             next_state = WAIT_LOCATION_STATE
-
         else:  # callback_data is an item ID
-            cart = self.elasticpath_api.carts.get_or_create_cart(chat_id)
+            cart = self.elasticpath_api.carts.get_or_create_cart(
+                update.callback_query.message.chat_id,
+            )
             cart_item_id = callback_data
             self.elasticpath_api.carts.remove_cart_item(cart, cart_item_id)
-
             self.show_cart(update, context)
             next_state = CART_STATE
 
         return next_state
 
     def handle_location_state(self, update: Update, context: CallbackContext) -> str:
+        """Retrieve user's location, show delivery options."""
         if update.message.location is None:
             try:
-                longitude, latitude = fetch_coordinates(update.message.text)
+                user_longitude, user_latitude = fetch_coordinates(update.message.text)
             except UnknownAddressError:
                 update.message.reply_text('Location is not recognized. Please try again.')
                 return WAIT_LOCATION_STATE
         else:
             location = update.message.location
-            longitude, latitude = location.longitude, location.latitude
+            user_longitude, user_latitude = location.longitude, location.latitude
 
-        def shop_distance(shop_entry: Entry) -> int:
-            return int(distance(
-                (shop_entry.fields['Longitude'], shop_entry.fields['Latitude']),
-                (longitude, latitude),
-            ).meters)
-
+        shop_distance = shop_distance_calculator(user_longitude, user_latitude)
         nearest_shop = min(
             self.elasticpath_api.flows.get_all_entries(self.shop_flow),
             key=shop_distance,
@@ -172,68 +167,75 @@ class ElasticpathShopBot:
             update: Update,
             context: CallbackContext,
             nearest_shop: Entry,
-            shop_distance: int
+            shop_distance: int,
     ) -> None:
+        """Calculate and display delivery price."""
         if shop_distance < 500:
             update.message.reply_text(
                 f'Delivery is free! '
                 f'Also you can get your order at {nearest_shop.fields["Address"]}. '
-                f'It is only {shop_distance} meters away from you.'
+                f'It is only {shop_distance} meters away from you.',
             )
         elif shop_distance < 5000:
-            update.message.reply_text(f'Delivery price is 100 rubles.')
+            update.message.reply_text('Delivery price is 100 rubles.')
         elif shop_distance < 20_000:
-            update.message.reply_text(f'Delivery price is 300 rubles.')
+            update.message.reply_text('Delivery price is 300 rubles.')
         else:
-            update.message.reply_text(f'Sorry, you are too far away from the nearest shop :(.')
+            update.message.reply_text('Sorry, you are too far away from the nearest shop :(.')
 
     def show_product_list(self, update: Update, context: CallbackContext) -> None:
+        """Display product list with navigation buttons."""
         if update.callback_query is not None:
             # delete the previous product list page
             update.callback_query.delete_message()
 
-        current_page = context.user_data['page']
-
         menu_text = '*Please select a product:*'
         buttons = []
-        for product in self.elasticpath_api.products.get_products(
-                limit=PRODUCT_LIST_PAGE_SIZE, offset=PRODUCT_LIST_PAGE_SIZE*current_page
-        ):
-            buttons.append(
-                [InlineKeyboardButton(product.name, callback_data=product.id)],
-            )
-
-        navigation_buttons = []
-        if current_page > 0:
-            navigation_buttons.append(
-                InlineKeyboardButton('<<<', callback_data=PREVIOUS_PAGE_CALLBACK_DATA)
-            )
-        next_page_products_amount = len(
-            self.elasticpath_api.products.get_products(
-                limit=PRODUCT_LIST_PAGE_SIZE, offset=PRODUCT_LIST_PAGE_SIZE*(current_page+1)
-            )
+        products_to_display = self.elasticpath_api.products.get_products(
+            limit=PRODUCT_LIST_PAGE_SIZE,
+            offset=PRODUCT_LIST_PAGE_SIZE * context.user_data['page'],
         )
-        if next_page_products_amount > 0:
-            navigation_buttons.append(
-                InlineKeyboardButton('>>>', callback_data=NEXT_PAGE_CALLBACK_DATA)
-            )
-        buttons.append(navigation_buttons)
-
-        reply_markup = InlineKeyboardMarkup(buttons)
+        for product in products_to_display:
+            buttons.append([InlineKeyboardButton(product.name, callback_data=product.id)])
+        buttons.append(self.navigation_buttons(update, context))
 
         if update.message:
             update.message.reply_text(
                 text=menu_text,
-                reply_markup=reply_markup,
+                reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode=ParseMode.MARKDOWN,
             )
         else:
             update.callback_query.answer()
             update.callback_query.message.reply_text(
                 text=menu_text,
-                reply_markup=reply_markup,
+                reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode=ParseMode.MARKDOWN,
             )
+
+    def navigation_buttons(
+            self, update: Update, context: CallbackContext,
+    ) -> List[InlineKeyboardButton]:
+        """Show navigation buttons for product list."""
+        current_page = context.user_data['page']
+
+        navigation_buttons = []
+        if current_page > 0:
+            navigation_buttons.append(
+                InlineKeyboardButton('<<<', callback_data=PREVIOUS_PAGE_CALLBACK_DATA),
+            )
+        next_page_products_amount = len(
+            self.elasticpath_api.products.get_products(
+                limit=PRODUCT_LIST_PAGE_SIZE,
+                offset=PRODUCT_LIST_PAGE_SIZE * (current_page + 1),
+            ),
+        )
+        if next_page_products_amount > 0:
+            navigation_buttons.append(
+                InlineKeyboardButton('>>>', callback_data=NEXT_PAGE_CALLBACK_DATA),
+            )
+
+        return navigation_buttons
 
     def show_product_description(
             self,
@@ -241,8 +243,8 @@ class ElasticpathShopBot:
             context: CallbackContext,
             product_id: str,
     ) -> None:
-        query = update.callback_query
-        query.answer()
+        """Display product description with checkout and menu buttons."""
+        update.callback_query.answer()
 
         product = self.elasticpath_api.products.get_product(product_id)
         cart = self.elasticpath_api.carts.get_or_create_cart(update.callback_query.message.chat_id)
@@ -255,7 +257,6 @@ class ElasticpathShopBot:
             f'*In cart*: {amount_in_cart}\n\n'
             f'{product.description}\n'
         )
-
         add_amount_buttons = []
         for amount in AVAILABLE_PRODUCT_AMOUNTS:
             add_amount_buttons.append(
@@ -273,17 +274,17 @@ class ElasticpathShopBot:
             [InlineKeyboardButton(text='Show cart', callback_data=SHOW_CART_CALLBACK_DATA)],
         ]
 
-        query.message.reply_photo(
+        update.callback_query.message.reply_photo(
             photo=self.elasticpath_api.files.get_file(product.main_image_id).link,
             caption=product_description,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=ParseMode.MARKDOWN,
         )
-        query.delete_message()
+        update.callback_query.delete_message()
 
     def show_cart(self, update: Update, context: CallbackContext) -> None:
-        query = update.callback_query
-        query.answer()
+        """Show cart content with order and menu buttons."""
+        update.callback_query.answer()
 
         buttons = []
         message_text = '*Items in cart*:\n'
@@ -306,12 +307,12 @@ class ElasticpathShopBot:
             [InlineKeyboardButton(text='Back to menu', callback_data=PRODUCT_LIST_CALLBACK_DATA)],
         ))
 
-        query.message.reply_text(
+        update.callback_query.message.reply_text(
             text=message_text,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=ParseMode.MARKDOWN,
         )
-        query.delete_message()
+        update.callback_query.delete_message()
 
 
 def serialize_product_id_and_amount(product_id: str, amount: int) -> str:
@@ -327,6 +328,18 @@ def deserialize_product_id_and_amount(serialized_data: str) -> tuple:
     """Extract information about product ID and it's amount from a JSON string."""
     deserialized_data = json.loads(serialized_data)
     return deserialized_data['id'], deserialized_data['amount']
+
+
+def shop_distance_calculator(longitude: float, latitude: float) -> Callable:
+    """Create a function that calculates the distance between given position and arbitrary shop."""
+    def shop_distance(shop_entry: Entry) -> int:
+        """Calculate the distance to provided shop in meters."""
+        user_location = (longitude, latitude)
+        shop_location = (shop_entry.fields['Longitude'], shop_entry.fields['Latitude'])
+
+        return int(distance(user_location, shop_location).meters)
+
+    return shop_distance
 
 
 def start_bot() -> None:
