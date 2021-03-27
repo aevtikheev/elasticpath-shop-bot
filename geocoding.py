@@ -1,6 +1,7 @@
 """Module to work with geocoding-related stuff."""
-import httpx
 from typing import Tuple
+
+import httpx
 
 from settings import settings
 

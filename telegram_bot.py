@@ -78,16 +78,15 @@ class ElasticpathShopBot:
         if callback_data == NEXT_PAGE_CALLBACK_DATA:
             context.user_data[PRODUCT_LIST_PAGE] += 1
             self.show_product_list(update, context)
-            next_state = PRODUCT_LIST_STATE
+            return PRODUCT_LIST_STATE
         elif callback_data == PREVIOUS_PAGE_CALLBACK_DATA:
             context.user_data[PRODUCT_LIST_PAGE] -= 1
             self.show_product_list(update, context)
-            next_state = PRODUCT_LIST_STATE
-        else:  # callback_data is a product ID
-            self.show_product_description(update=update, context=context, product_id=callback_data)
-            next_state = PRODUCT_DESCRIPTION_STATE
+            return PRODUCT_LIST_STATE
 
-        return next_state
+        # callback_data is a product ID otherwise
+        self.show_product_description(update=update, context=context, product_id=callback_data)
+        return PRODUCT_DESCRIPTION_STATE
 
     def handle_product_description_state(self, update: Update, context: CallbackContext) -> str:
         """Move back to product list, show cart or add the product to a cart."""
@@ -95,25 +94,24 @@ class ElasticpathShopBot:
 
         if callback_data == PRODUCT_LIST_CALLBACK_DATA:
             self.show_product_list(update, context)
-            next_state = PRODUCT_LIST_STATE
+            return PRODUCT_LIST_STATE
         elif callback_data == SHOW_CART_CALLBACK_DATA:
             self.show_cart(update, context)
-            next_state = CART_STATE
-        else:  # callback_data is a JSON containing product ID and amount
-            product_id, amount = deserialize_product_id_and_amount(callback_data)
-            cart = self.elasticpath_api.carts.get_or_create_cart(
-                update.callback_query.message.chat_id,
-            )
-            self.elasticpath_api.carts.add_product_to_cart(
-                product=self.elasticpath_api.products.get_product(product_id),
-                cart=cart,
-                quantity=amount,
-            )
-            update.callback_query.answer('Added')
-            self.show_product_description(update=update, context=context, product_id=product_id)
-            next_state = PRODUCT_DESCRIPTION_STATE
+            return CART_STATE
 
-        return next_state
+        # callback_data is a JSON containing product ID and amount
+        product_id, amount = deserialize_product_id_and_amount(callback_data)
+        cart = self.elasticpath_api.carts.get_or_create_cart(
+            update.callback_query.message.chat_id,
+        )
+        self.elasticpath_api.carts.add_product_to_cart(
+            product=self.elasticpath_api.products.get_product(product_id),
+            cart=cart,
+            quantity=amount,
+        )
+        update.callback_query.answer('Added')
+        self.show_product_description(update=update, context=context, product_id=product_id)
+        return PRODUCT_DESCRIPTION_STATE
 
     def handle_cart_state(self, update: Update, context: CallbackContext) -> str:
         """Return back to product list, change the cart items or ask the location of the user."""
@@ -121,20 +119,19 @@ class ElasticpathShopBot:
 
         if callback_data == PRODUCT_LIST_CALLBACK_DATA:
             self.show_product_list(update, context)
-            next_state = PRODUCT_LIST_STATE
+            return PRODUCT_LIST_STATE
         elif callback_data == CHECKOUT_CALLBACK_DATA:
             update.callback_query.message.reply_text('Please provide you location or address.')
-            next_state = WAIT_LOCATION_STATE
-        else:  # callback_data is an item ID
-            cart = self.elasticpath_api.carts.get_or_create_cart(
-                update.callback_query.message.chat_id,
-            )
-            cart_item_id = callback_data
-            self.elasticpath_api.carts.remove_cart_item(cart, cart_item_id)
-            self.show_cart(update, context)
-            next_state = CART_STATE
+            return WAIT_LOCATION_STATE
 
-        return next_state
+        # callback_data is an item ID
+        cart = self.elasticpath_api.carts.get_or_create_cart(
+            update.callback_query.message.chat_id,
+        )
+        cart_item_id = callback_data
+        self.elasticpath_api.carts.remove_cart_item(cart, cart_item_id)
+        self.show_cart(update, context)
+        return CART_STATE
 
     def handle_location_state(self, update: Update, context: CallbackContext) -> str:
         """Retrieve user's location, show delivery options."""

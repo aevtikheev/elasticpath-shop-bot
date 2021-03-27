@@ -83,7 +83,7 @@ class Field:
 
 
 class Entry:
-    """Represents a field from Elasticpath shop."""
+    """Represents a field entry from Elasticpath shop."""
 
     def __init__(self, entry_data: dict):
         self._entry_data = entry_data
@@ -94,3 +94,14 @@ class Entry:
         for key in self._entry_data.keys():
             if key not in ('id', 'type', 'meta', 'links'):
                 self.fields[key] = self._entry_data[key]
+
+
+class Customer:
+    """Represents a customer from Elasticpath shop."""
+
+    def __init__(self, entry_data: dict):
+        self._entry_data = entry_data
+
+        self.id = self._entry_data['id']
+        self.name = self._entry_data['name']
+        self.email = self._entry_data['email']

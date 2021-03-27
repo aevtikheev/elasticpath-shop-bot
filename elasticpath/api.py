@@ -7,7 +7,7 @@ from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import httpx
 
-from elasticpath.models import Cart, CartItem, Entry, Field, File, Flow, Product
+from elasticpath.models import Cart, CartItem, Entry, Field, File, Flow, Product, Customer
 
 ELASTICPATH_AUTH_URL = 'https://api.moltin.com/oauth/access_token'
 ELASTICPATH_API_URL = 'https://api.moltin.com/v2'
@@ -161,18 +161,18 @@ class _ProductsAPI:
             products.append(Product(product_data))
         return products
 
-    def add_file_to_product(self, file: 'File', product: 'Product'):
+    def add_file_to_product(self, elasticpath_file: 'File', product: 'Product'):
         """Create relationship between a file and a product."""
         self._session.post(
             f'{self._url}/{product.id}/relationships/files',
-            json=[{'type': 'file', 'id': file.id}],
+            json=[{'type': 'file', 'id': elasticpath_file.id}],
         )
 
-    def add_main_image_to_product(self, file: 'File', product: 'Product'):
+    def add_main_image_to_product(self, elasticpath_file: 'File', product: 'Product'):
         """Create relationship between a file and a product."""
         self._session.post(
             f'{self._url}/{product.id}/relationships/main-image',
-            json={'data': {'type': 'main_image', 'id': file.id}},
+            json={'data': {'type': 'main_image', 'id': elasticpath_file.id}},
         )
 
 
@@ -266,7 +266,7 @@ class _CustomersAPI:
         self._session = session
         self._url = f'{ELASTICPATH_API_URL}/customers'
 
-    def create_customer(self, email: str, name: str = 'Anonymous') -> None:
+    def create_customer(self, email: str, name: str = 'Anonymous') -> 'Customer':
         """Create customer in ElasticPath shop."""
         customer_data = {
             'data': {
@@ -275,6 +275,10 @@ class _CustomersAPI:
                 'email': email,
             },
         }
+        response = self._session.post(f'{self._url}', json=customer_data)
+        customer_data = response.json()['data']
+
+        return Customer(customer_data)
 
 
 class _FlowsAPI:
@@ -336,8 +340,7 @@ class _FlowsAPI:
         offset = 0
         entries_batch = self.get_entries(slug, limit=batch_size, offset=offset)
         while entries_batch:
-            for entry in entries_batch:
-                yield entry
+            yield from entries_batch
             offset += batch_size
             entries_batch = self.get_entries(slug, limit=batch_size, offset=offset)
 
