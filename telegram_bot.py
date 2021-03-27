@@ -60,7 +60,9 @@ class ElasticpathShopBot:
         if user_reply == '/start':
             user_state = START_STATE
         else:
-            user_state = self.users_db.get(chat_id).decode('utf-8')
+            state_in_db = self.users_db.get(chat_id)
+            user_state = START_STATE if state_in_db is None else state_in_db.decode('utf-8')
+
         state_handler = self._state_functions[user_state]
         next_state = state_handler(update, context)
         self.users_db.set(chat_id, next_state)
